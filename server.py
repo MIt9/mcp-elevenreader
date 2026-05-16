@@ -16,6 +16,7 @@ UPLOAD_DELAY = 3  # seconds between uploads
 MAX_RETRIES = 3
 
 _token_cache = {"access_token": None, "expires_at": 0}
+_token_lock = threading.Lock()
 _upload_thread: threading.Thread | None = None
 _upload_pause = threading.Event()
 _upload_pause.set()  # not paused initially
@@ -28,19 +29,20 @@ def _get_access_token() -> str:
     if not refresh_token:
         raise RuntimeError("ELEVEN_REFRESH_TOKEN env var is not set")
 
-    if _token_cache["access_token"] and _token_cache["expires_at"] > time.time() + 60:
+    with _token_lock:
+        if _token_cache["access_token"] and _token_cache["expires_at"] > time.time() + 60:
+            return _token_cache["access_token"]
+
+        r = httpx.post(
+            f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+        )
+        r.raise_for_status()
+        resp = r.json()
+
+        _token_cache["access_token"] = resp["id_token"]
+        _token_cache["expires_at"] = time.time() + int(resp["expires_in"])
         return _token_cache["access_token"]
-
-    r = httpx.post(
-        f"https://securetoken.googleapis.com/v1/token?key={FIREBASE_KEY}",
-        data={"grant_type": "refresh_token", "refresh_token": refresh_token},
-    )
-    r.raise_for_status()
-    resp = r.json()
-
-    _token_cache["access_token"] = resp["id_token"]
-    _token_cache["expires_at"] = time.time() + int(resp["expires_in"])
-    return _token_cache["access_token"]
 
 
 def _client() -> httpx.Client:
@@ -136,12 +138,8 @@ def add_directory(dir_path: str, extensions: str = ".epub,.pdf") -> str:
     )
 
     # Deduplicate: skip files already in library
-    with _client() as c:
-        r = c.get("/v1/reader/reads", params={"page_size": 1000})
-        r.raise_for_status()
-        existing_titles = {read["title"] for read in r.json().get("reads", [])}
-
-    files = [f for f in files if Path(f).name not in existing_titles]
+    existing_titles = {read["title"] for read in _fetch_all_reads()}
+    files = [f for f in files if Path(f).stem not in existing_titles and Path(f).name not in existing_titles]
 
     if not files:
         return "All files already uploaded."
@@ -182,13 +180,90 @@ def upload_status() -> dict:
     }
 
 
-@mcp.tool()
-def list_reads(page_size: int = 50) -> dict:
-    """List all documents/books in the library."""
+def _compact_read(read: dict) -> dict:
+    """Extract only essential fields from a read."""
+    char_count = read.get("char_count", 0)
+    offset = read.get("last_listened_char_offset", 0)
+    progress = round(offset / char_count * 100) if char_count else 0
+    return {
+        "read_id": read["read_id"],
+        "title": read.get("title", ""),
+        "author": read.get("author") or "",
+        "language": read.get("language", ""),
+        "progress": f"{progress}%",
+        "finished": bool(read.get("completed_at_unix") or progress >= 100),
+        "word_count": read.get("word_count", 0),
+        "added_at": read.get("added_at_unix", 0),
+    }
+
+
+_reads_cache = {"data": None, "expires_at": 0}
+_reads_lock = threading.Lock()
+CACHE_TTL = 60  # seconds
+
+
+def _invalidate_cache():
+    """Invalidate reads cache after mutations."""
+    with _reads_lock:
+        _reads_cache["data"] = None
+        _reads_cache["expires_at"] = 0
+
+
+def _fetch_all_reads() -> list[dict]:
+    """Fetch all reads from API using collections/books (full history). Cached for 60s."""
+    with _reads_lock:
+        if _reads_cache["data"] and _reads_cache["expires_at"] > time.time():
+            return _reads_cache["data"]
+    all_reads = []
+    cursor = None
     with _client() as c:
-        r = c.get("/v1/reader/reads", params={"page_size": page_size})
-        r.raise_for_status()
-        return r.json()
+        while True:
+            params = {"page_size": 500}
+            if cursor:
+                params["next_cursor"] = cursor
+            r = c.get("/v1/reader/collections/books", params=params)
+            r.raise_for_status()
+            data = r.json()
+            all_reads.extend(data.get("items", []))
+            if not data.get("has_more") or not data.get("next_cursor"):
+                break
+            cursor = data["next_cursor"]
+    with _reads_lock:
+        _reads_cache["data"] = all_reads
+        _reads_cache["expires_at"] = time.time() + CACHE_TTL
+    return all_reads
+
+
+@mcp.tool()
+def list_reads(page_size: int = 10, page: int = 1) -> dict:
+    """List documents/books in the library (paginated, compact).
+
+    Args:
+        page_size: Number of books per page (default: 10)
+        page: Page number starting from 1 (default: 1)
+    """
+    all_reads = _fetch_all_reads()
+    total = len(all_reads)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_reads = [_compact_read(r) for r in all_reads[start:end]]
+    return {
+        "reads": page_reads,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+@mcp.tool()
+def list_all_reads() -> dict:
+    """Get full reading history — all books in compact format (title, author, progress, language)."""
+    all_reads = _fetch_all_reads()
+    return {
+        "total": len(all_reads),
+        "reads": [_compact_read(r) for r in all_reads],
+    }
 
 
 @mcp.tool()
@@ -220,6 +295,7 @@ def add_url(url: str) -> dict:
         with _client() as c:
             r = c.post("/v1/reader/reads/add/v2", data={"from_url": url})
             r.raise_for_status()
+            _invalidate_cache()
             return r.json()
     finally:
         _upload_pause.set()
@@ -237,6 +313,7 @@ def add_document(file_path: str) -> dict:
                     files={"from_document": (os.path.basename(file_path), f)},
                 )
                 r.raise_for_status()
+                _invalidate_cache()
                 return r.json()
     finally:
         _upload_pause.set()
@@ -248,16 +325,14 @@ def delete_read(read_id: str) -> dict:
     with _client() as c:
         r = c.delete(f"/v1/reader/reads/{_encode_read_id(read_id)}")
         r.raise_for_status()
+        _invalidate_cache()
         return r.json()
 
 
 @mcp.tool()
 def deduplicate() -> dict:
     """Find and remove duplicate reads (same title). Keeps the oldest one."""
-    with _client() as c:
-        r = c.get("/v1/reader/reads", params={"page_size": 1000})
-        r.raise_for_status()
-        reads = r.json().get("reads", [])
+    reads = _fetch_all_reads()
 
     # Group by title
     by_title: dict[str, list] = {}
@@ -277,6 +352,8 @@ def deduplicate() -> dict:
             deleted.append({"title": title, "read_id": dup["read_id"]})
             time.sleep(0.5)
 
+    if deleted:
+        _invalidate_cache()
     return {"deleted": len(deleted), "items": deleted}
 
 
@@ -361,6 +438,37 @@ def update_progress(read_id: str, char_offset: int) -> dict:
         )
         r.raise_for_status()
         return r.json()
+
+
+@mcp.tool()
+def mark_almost_finished(threshold: float = 0.97) -> dict:
+    """Find books at 97-99% progress (not yet marked completed) and mark them as finished by setting offset to char_count.
+
+    Args:
+        threshold: Minimum progress ratio to consider as "almost finished" (default: 0.97)
+    """
+    reads = _fetch_all_reads()
+
+    marked = []
+    for read in reads:
+        char_count = read.get("char_count", 0)
+        offset = read.get("last_listened_char_offset", 0)
+        if not char_count or read.get("completed_at_unix"):
+            continue
+        progress = offset / char_count
+        if progress >= threshold and progress < 1.0:
+            with _client() as c:
+                r = c.patch(
+                    f"/v1/reader/reads/{_encode_read_id(read['read_id'])}",
+                    json={"last_listened_char_offset": char_count},
+                )
+                r.raise_for_status()
+            marked.append({"title": read["title"], "progress": f"{progress:.1%}"})
+            time.sleep(0.5)
+
+    if marked:
+        _invalidate_cache()
+    return {"marked_completed": len(marked), "items": marked}
 
 
 def main():
