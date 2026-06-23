@@ -5,3 +5,7 @@
 __pycache__/
 *.egg-info/
 *.har
+dist/
+.DS_Store
+/CLAUDE.md
+/.claude/

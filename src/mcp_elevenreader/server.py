@@ -7,11 +7,29 @@ from pathlib import Path
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("elevenreader")
+mcp = FastMCP(
+    "elevenreader",
+    instructions="""
+    MCP server for ElevenReader (ElevenLabs text-to-speech reader).
+
+    Key workflows:
+    - Browse library: list_reads (paginated) or list_all_reads (full history)
+    - Get details / content: get_read, get_read_content
+    - Add content: add_url (web article), add_document (epub/pdf file), add_directory (bulk upload)
+    - Monitor bulk upload: upload_status
+    - Manage library: delete_read, deduplicate, mark_almost_finished
+    - Voices & config: list_voices, get_voice, get_config, update_config
+    - Account: get_customer (subscription/credits)
+    - Collections & bookmarks: get_collections, get_bookmarks
+    - Progress: update_progress
+
+    Requires ELEVEN_REFRESH_TOKEN env var (Firebase refresh token from elevenreader.io).
+    """,
+)
 
 BASE_URL = "https://api.elevenlabs.io"
 FIREBASE_KEY = "AIzaSyDSJy4Xs8dz8NNlAImw1CKWbWl23JTf-F0"
-STATE_FILE = Path(__file__).parent / ".upload_state.json"
+STATE_FILE = Path(__file__).parent.parent.parent / ".upload_state.json"
 UPLOAD_DELAY = 3  # seconds between uploads
 MAX_RETRIES = 3
 

@@ -12,25 +12,45 @@ Open https://elevenreader.io, log in, then run in browser console (F12 → Conso
 JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k => k.startsWith('firebase:authUser:')))).stsTokenManager.refreshToken
 ```
 
-### 2. Configure MCP
+The refresh token is long-lived (months). Access tokens are refreshed automatically.
 
-Add to your MCP config (`~/.kiro/settings.json`, Claude Desktop, etc.):
+### 2. Connect to Claude Code
+
+```bash
+claude mcp add elevenreader -e ELEVEN_REFRESH_TOKEN=your-token -- uvx mcp-elevenreader
+```
+
+To make it available in all projects, add to `~/.claude/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "elevenreader": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/mcp-elevenreader", "python", "server.py"],
+      "command": "uvx",
+      "args": ["mcp-elevenreader"],
       "env": {
-        "ELEVEN_REFRESH_TOKEN": "paste-your-refresh-token-here"
+        "ELEVEN_REFRESH_TOKEN": "your-token"
       }
     }
   }
 }
 ```
 
-The refresh token is long-lived (months). Access tokens are refreshed automatically.
+### Other clients (Claude Desktop / Kiro / Cursor)
+
+```json
+{
+  "mcpServers": {
+    "elevenreader": {
+      "command": "uvx",
+      "args": ["mcp-elevenreader"],
+      "env": {
+        "ELEVEN_REFRESH_TOKEN": "your-token"
+      }
+    }
+  }
+}
+```
 
 ## Tools
 
@@ -64,9 +84,18 @@ The refresh token is long-lived (months). Access tokens are refreshed automatica
 - **Upload queue**: Background thread with retry (3 attempts), rate limiting, pause for priority uploads
 - **Thread safety**: Locks on token cache and reads cache
 
+## Development
+
+```bash
+git clone https://github.com/MIt9/mcp-elevenreader
+cd mcp-elevenreader
+uv sync
+mcp dev src/mcp_elevenreader/server.py
+```
+
 ## Requirements
 
-- Python ≥ 3.11
+- Python ≥ 3.10
 - Dependencies: httpx, mcp
 
 ## License

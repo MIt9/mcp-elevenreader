@@ -1,19 +1,38 @@
 [project]
 name = "mcp-elevenreader"
-version = "0.1.0"
-description = "MCP server for ElevenReader (ElevenLabs Reader) API"
-requires-python = ">=3.11"
+version = "0.1.1"
+description = "MCP server for ElevenReader (ElevenLabs text-to-speech reader)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "mit9", email = "siniidrozd@gmail.com" },
+]
+keywords = ["mcp", "claude", "elevenlabs", "elevenreader", "text-to-speech", "tts"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Utilities",
+]
 dependencies = [
     "mcp[cli]>=1.0.0",
     "httpx>=0.27.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/MIt9/mcp-elevenreader"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["src/mcp_elevenreader"]
 
 [project.scripts]
-mcp-elevenreader = "server:main"
+mcp-elevenreader = "mcp_elevenreader.server:main"
