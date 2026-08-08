@@ -52,6 +52,27 @@ To make it available in all projects, add to `~/.claude/mcp.json`:
 }
 ```
 
+### opencode
+
+Add to `~/.config/opencode/opencode.json`. Note: opencode uses **`environment`** (not `env`) for MCP server env vars:
+
+```json
+{
+  "mcp": {
+    "elevenreader": {
+      "type": "local",
+      "enabled": true,
+      "command": ["uvx", "mcp-elevenreader"],
+      "environment": {
+        "ELEVEN_REFRESH_TOKEN": "your-token"
+      }
+    }
+  }
+}
+```
+
+Config is only read at opencode startup — **quit and restart** opencode after adding. If the token still isn't picked up, check it's under `environment`, not `env`.
+
 ## Tools
 
 | Tool | Description |
