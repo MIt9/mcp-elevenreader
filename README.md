@@ -1,6 +1,19 @@
 # mcp-elevenreader
 
+> **Listen to any document from Claude or Cursor** — upload epubs/pdfs, manage TTS reading queue and control playback via ElevenLabs ElevenReader.
+
 MCP server for [ElevenReader](https://elevenreader.io) — ElevenLabs text-to-speech reader.
+
+## Quick Start
+
+```bash
+# 1. Get refresh token: ElevenReader → F12 Console → copy stsTokenManager.refreshToken
+# 2. Run via Claude Code (or add to Claude Desktop config below)
+claude mcp add elevenreader -e ELEVEN_REFRESH_TOKEN=your-token -- uvx mcp-elevenreader
+# 3. Ask Claude: "List my ElevenReader books"
+```
+
+> Works with Claude Code, Claude Desktop, Cursor, Kiro and opencode — see Setup below for JSON configs.
 
 ## Setup
 
